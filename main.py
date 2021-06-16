@@ -5,13 +5,13 @@ import os
 import argparse
 import getpass
 import functools
-from typing import Callable
+from typing import Callable, Optional, Union
 
 # NON STDLIB
 import requests
 from requests.auth import HTTPBasicAuth, AuthBase
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)
 
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
@@ -43,8 +43,8 @@ class BitbucketSession:
         self._API_URL = api_url
         self._API_DATE_FORMAT = "%Y-%m-%dT%H:%M:%S+00:00"
 
-        self._access_token = None
-        self._refresh_token = None
+        self._access_token = ""
+        self._refresh_token = ""
 
         self.session = requests.Session()
 
@@ -81,7 +81,7 @@ class BitbucketSession:
         self.session.auth = BearerAuth(self._access_token)
 
     def refresh_access_token(self) -> None:
-        assert self._refresh_token is not None, "No refresh token"
+        assert self._refresh_token != "", "No refresh token"
 
         url = "https://bitbucket.org/site/oauth2/access_token"
         request_data = {
@@ -102,13 +102,13 @@ class BitbucketSession:
 
         self.session.auth = BearerAuth(self._access_token)
 
-    def requires_access_token(func: Callable) -> Callable:
+    def requires_access_token(func: Callable) -> Callable: # type: ignore
         """Decorator to assert Access Token is set"""
 
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
             self = args[0]
-            assert self._access_token is not None, "No access token"
+            assert self._access_token != "", "No access token"
 
             return func(*args, **kwargs)
 
@@ -142,10 +142,10 @@ class BitbucketSession:
     def set_user_info(
         self,
         *,
-        username: str = None,
-        uuid: str = None,
-        nickname: str = None,
-        account_id: str = None,
+        username: Optional[str] = None,
+        uuid: Optional[str] = None,
+        nickname: Optional[str] = None,
+        account_id: Optional[str] = None,
     ) -> None:
         if username is not None:
             self._username = username
@@ -199,10 +199,10 @@ class BitbucketSession:
         self,
         repo_full_name: str,
         *,
-        account_id: str = None,
-        start_date: datetime = None,
-        end_date: datetime = None,
-    ) -> list[dict]:
+        account_id: Optional[str] = None,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+    ) -> list[dict[str, Union[str, datetime]]]:
         repo_workspace, repo_slug = repo_full_name.split("/")
 
         # FOR EACH REPO THAT USER HAS ACCESS TO, CHECK THE COMMITS (https://developer.atlassian.com/bitbucket/api/2/reference/resource/repositories/%7Bworkspace%7D/%7Brepo_slug%7D/commits)
@@ -210,10 +210,8 @@ class BitbucketSession:
             f"{self._API_URL}/repositories/{repo_workspace}/{repo_slug}/commits"
         )
 
-        params = {}
-
         res = requests.get(
-            repo_commits_api_url, params, auth=BearerAuth(self._access_token)
+            repo_commits_api_url, auth=BearerAuth(self._access_token)
         )
         res_json = res.json()
 
@@ -269,8 +267,8 @@ class BitbucketSession:
     def run(
         self,
         *,
-        start_date: datetime = None,
-        end_date: datetime = None,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
         sort_individually: bool = False,
     ) -> None:
         self.new_access_token()
