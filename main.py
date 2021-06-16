@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 import sys
 import os
 import argparse
@@ -229,8 +229,13 @@ class BitbucketSession:
                     continue
 
             # Filter by Date
-            # TODO: handle timezone, since I think Bitbucket datetimes are UTC timezone
             date = datetime.strptime(commit["date"], self._API_DATE_FORMAT)
+            # Bitbucket dates are UTC, so we add UTC timezone to date
+            date_utc = date.replace(tzinfo=timezone.utc)
+            # Detect local system's timezone.  If need to manually specify timezone, can use pytz.timezone("US/Central")
+            local_timezone = datetime.now(timezone.utc).astimezone().tzinfo
+            date = date_utc.astimezone(local_timezone)
+
             if start_date is not None:
                 if date < start_date:
                     # Inclusive (>=) of start_date
