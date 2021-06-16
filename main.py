@@ -11,7 +11,7 @@ from typing import Callable, Optional, Union
 import requests
 from requests.auth import HTTPBasicAuth, AuthBase
 
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
@@ -61,7 +61,7 @@ class BitbucketSession:
         }
 
         # TODO: handle 2FA request and response where password is not valid
-        res = requests.post(
+        res = self.session.post(
             url,
             data=request_data,
             auth=HTTPBasicAuth(self._CONSUMER_KEY, self._CONSUMER_SECRET),
@@ -89,7 +89,7 @@ class BitbucketSession:
             "refresh_token": self._refresh_token,
         }
 
-        res = requests.post(
+        res = self.session.post(
             url,
             data=request_data,
             auth=HTTPBasicAuth(self._CONSUMER_KEY, self._CONSUMER_SECRET),
@@ -102,7 +102,7 @@ class BitbucketSession:
 
         self.session.auth = BearerAuth(self._access_token)
 
-    def requires_access_token(func: Callable) -> Callable: # type: ignore
+    def requires_access_token(func: Callable) -> Callable:  # type: ignore
         """Decorator to assert Access Token is set"""
 
         @functools.wraps(func)
@@ -119,7 +119,7 @@ class BitbucketSession:
 
         # GET USER ACCOUNT_ID and USER UUID
         url = f"{self._API_URL}/user"
-        res = requests.get(url, auth=BearerAuth(self._access_token))
+        res = self.session.get(url, auth=BearerAuth(self._access_token))
         res_json = res.json()
 
         # NOTE: here is how we will get the username if using something other than Password authentication, like Oath2
@@ -180,7 +180,7 @@ class BitbucketSession:
                 f'permission="{p}"' for p in permissions
             )  ## e.g.,  q='permission="admin" OR permission="write" OR permission="read"'
         }
-        res = requests.get(url, params, auth=BearerAuth(self._access_token))
+        res = self.session.get(url, params=params, auth=BearerAuth(self._access_token))
         res_json = res.json()
 
         repo_objects = res_json["values"]
@@ -210,7 +210,7 @@ class BitbucketSession:
             f"{self._API_URL}/repositories/{repo_workspace}/{repo_slug}/commits"
         )
 
-        res = requests.get(
+        res = self.session.get(
             repo_commits_api_url, auth=BearerAuth(self._access_token)
         )
         res_json = res.json()
