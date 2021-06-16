@@ -31,22 +31,27 @@ def valid_date(date_string: str):
         raise argparse.ArgumentTypeError(f"Invalid date string: {date_string}")
 
 
-parser = argparse.ArgumentParser(description="Get My Bitbucket Commits")
+parser = argparse.ArgumentParser(
+    description="Get My Bitbucket Commits",
+    formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+)
 required_group = parser.add_argument_group("required arguments")
 required_group.add_argument(
-    "-u", "--username", help="Your Bitbucket Username", required=True
+    "-u", "--username", help="Your Bitbucket Username", required=True, default=argparse.SUPPRESS
 )
 required_group.add_argument(
     "-k",
     "--key",
     help="Your Consumer Key. To create a consumer: https://bitbucket.org/{YOUR_WORKSPACE_ID}/workspace/settings/api",
     required=True,
+    default=argparse.SUPPRESS
 )
 required_group.add_argument(
     "-s",
     "--secret",
     help="Your Consumer Secret. To create a consumer: https://bitbucket.org/{YOUR_WORKSPACE_ID}/workspace/settings/api",
     required=True,
+    default=argparse.SUPPRESS
 )
 
 parser.add_argument(
@@ -70,6 +75,12 @@ parser.add_argument(
     help=f"Filter by end date.  Valid formats: [{escaped_percents_date_formats}]",
     default=None,
     type=valid_date,
+)
+parser.add_argument(
+    "--sort-individually",
+    help="If True, sort commits individually by their date.  If False, group commits by repo.",
+    default=False,
+    action="store_true"
 )
 args = parser.parse_args()
 
@@ -313,12 +324,24 @@ class BitbucketSession:
 
         return commit_list
 
-    def run(self, *, start_date: datetime = None, end_date: datetime = None) -> None:
+    @staticmethod
+    def sort_by_last_commit_date(x):
+        (repo_full_name, commit_list) = x
+        return commit_list[-1]["date"]
+
+    def run(
+        self,
+        *,
+        start_date: datetime = None,
+        end_date: datetime = None,
+        sort_individually: bool = False,
+    ) -> None:
         self.new_access_token()
 
         user_account_id = self.get_user_info()["account_id"]
         repositories = self.get_repositories_by_permission()
 
+        repo_to_commits = {}
         for repo_full_name in repositories:
             commit_list = self.get_commits_in_repository(
                 repo_full_name,
@@ -327,10 +350,35 @@ class BitbucketSession:
                 end_date=end_date,
             )
 
-            for commit_data in commit_list:
+            repo_to_commits[repo_full_name] = commit_list
+
+        if sort_individually:
+            # sort commits individually by each commit's date
+            # first flatten commits
+            all_commits = [cm for cm_list in repo_to_commits.values() for cm in cm_list]
+
+            sorted_commits = sorted(
+                all_commits, key=lambda cm: cm["date"], reverse=True
+            )
+
+            for commit_data in sorted_commits:
                 print(
                     f"{commit_data['date'].strftime('%Y-%m-%d, %I:%M %p')} | {commit_data['repo']} | {commit_data['message'].strip()}"
                 )
+        else:
+            # sort repos by their last commit's date
+            # so commits will grouped by repos
+            sorted_repos = sorted(
+                repo_to_commits.items(),
+                key=BitbucketSession.sort_by_last_commit_date,
+                reverse=True,
+            )
+
+            for repo_full_name, commit_list in sorted_repos:
+                for commit_data in commit_list:
+                    print(
+                        f"{commit_data['date'].strftime('%Y-%m-%d, %I:%M %p')} | {commit_data['repo']} | {commit_data['message'].strip()}"
+                    )
 
 
 def main():
@@ -349,13 +397,17 @@ def main():
     START_DATE = args.start_date
     END_DATE = args.end_date
 
+    SORT_INDIVIDUALLY = args.sort_individually
+
     session = BitbucketSession(
         username=USERNAME,
         password=PASSWORD,
         consumer_key=CONSUMER_KEY,
         consumer_secret=CONSUMER_SECRET,
     )
-    session.run(start_date=START_DATE, end_date=END_DATE)
+    session.run(
+        start_date=START_DATE, end_date=END_DATE, sort_individually=SORT_INDIVIDUALLY
+    )
 
 
 if __name__ == "__main__":
