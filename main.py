@@ -16,74 +16,6 @@ logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
 
-VALID_DATE_FORMATS = ("%Y-%m-%dT%H:%M:%S+00:00", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d")
-
-
-def valid_date(date_string: str):
-    for valid_format in VALID_DATE_FORMATS:
-        try:
-            date_object = datetime.strptime(date_string, valid_format)
-            return date_object
-        except Exception:
-            pass
-    else:
-        # if date_string could not be parsed to any of the VALID_DATE_FORMATS
-        raise argparse.ArgumentTypeError(f"Invalid date string: {date_string}")
-
-
-parser = argparse.ArgumentParser(
-    description="Get My Bitbucket Commits",
-    formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-)
-required_group = parser.add_argument_group("required arguments")
-required_group.add_argument(
-    "-u", "--username", help="Your Bitbucket Username", required=True, default=argparse.SUPPRESS
-)
-required_group.add_argument(
-    "-k",
-    "--key",
-    help="Your Consumer Key. To create a consumer: https://bitbucket.org/{YOUR_WORKSPACE_ID}/workspace/settings/api",
-    required=True,
-    default=argparse.SUPPRESS
-)
-required_group.add_argument(
-    "-s",
-    "--secret",
-    help="Your Consumer Secret. To create a consumer: https://bitbucket.org/{YOUR_WORKSPACE_ID}/workspace/settings/api",
-    required=True,
-    default=argparse.SUPPRESS
-)
-
-parser.add_argument(
-    "-p",
-    "--password",
-    help="Your Bitbucket Password. Note: 2FA accounts do not work. This cli argument takes priority over environment variable 'BITBUCKET_PASSWORD'. If neither the cli argument nor environment variable exist, then user will be prompted for password.",
-    default=None,
-)
-escaped_percents_date_formats = ", ".join(
-    map(lambda x: f'"{x.replace("%", "%%")}"', VALID_DATE_FORMATS)
-)
-
-parser.add_argument(
-    "--start-date",
-    help=f"Filter by start date.  Valid formats: [{escaped_percents_date_formats}]",
-    default=None,
-    type=valid_date,
-)
-parser.add_argument(
-    "--end-date",
-    help=f"Filter by end date.  Valid formats: [{escaped_percents_date_formats}]",
-    default=None,
-    type=valid_date,
-)
-parser.add_argument(
-    "--sort-individually",
-    help="If True, sort commits individually by their date.  If False, group commits by repo.",
-    default=False,
-    action="store_true"
-)
-args = parser.parse_args()
-
 
 class BearerAuth(AuthBase):
     def __init__(self, token: str):
@@ -381,7 +313,80 @@ class BitbucketSession:
                     )
 
 
+def get_args():
+    VALID_DATE_FORMATS = ("%Y-%m-%dT%H:%M:%S+00:00", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d")
+
+    def valid_date(date_string: str):
+        for valid_format in VALID_DATE_FORMATS:
+            try:
+                date_object = datetime.strptime(date_string, valid_format)
+                return date_object
+            except Exception:
+                pass
+        else:
+            # if date_string could not be parsed to any of the VALID_DATE_FORMATS
+            raise argparse.ArgumentTypeError(f"Invalid date string: {date_string}")
+
+    parser = argparse.ArgumentParser(
+        description="Get My Bitbucket Commits",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    required_group = parser.add_argument_group("required arguments")
+    required_group.add_argument(
+        "-u",
+        "--username",
+        help="Your Bitbucket Username",
+        required=True,
+        default=argparse.SUPPRESS,
+    )
+    required_group.add_argument(
+        "-k",
+        "--key",
+        help="Your Consumer Key. To create a consumer: https://bitbucket.org/{YOUR_WORKSPACE_ID}/workspace/settings/api",
+        required=True,
+        default=argparse.SUPPRESS,
+    )
+    required_group.add_argument(
+        "-s",
+        "--secret",
+        help="Your Consumer Secret. To create a consumer: https://bitbucket.org/{YOUR_WORKSPACE_ID}/workspace/settings/api",
+        required=True,
+        default=argparse.SUPPRESS,
+    )
+
+    parser.add_argument(
+        "-p",
+        "--password",
+        help="Your Bitbucket Password. Note: 2FA accounts do not work. This cli argument takes priority over environment variable 'BITBUCKET_PASSWORD'. If neither the cli argument nor environment variable exist, then user will be prompted for password.",
+        default=None,
+    )
+    escaped_percents_date_formats = ", ".join(
+        map(lambda x: f'"{x.replace("%", "%%")}"', VALID_DATE_FORMATS)
+    )
+
+    parser.add_argument(
+        "--start-date",
+        help=f"Filter by start date.  Valid formats: [{escaped_percents_date_formats}]",
+        default=None,
+        type=valid_date,
+    )
+    parser.add_argument(
+        "--end-date",
+        help=f"Filter by end date.  Valid formats: [{escaped_percents_date_formats}]",
+        default=None,
+        type=valid_date,
+    )
+    parser.add_argument(
+        "--sort-individually",
+        help="If True, sort commits individually by their date.  If False, group commits by repo.",
+        default=False,
+        action="store_true",
+    )
+    return parser.parse_args()
+
+
 def main():
+    args = get_args()
     USERNAME = args.username
     PASSWORD = args.password
     if PASSWORD is None:
