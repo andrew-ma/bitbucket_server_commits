@@ -87,11 +87,11 @@ class BitbucketSession:
     def __init__(
         self,
         *,
-        username,
-        password,
-        consumer_key,
-        consumer_secret,
-        api_url="https://api.bitbucket.org/2.0",
+        username: str,
+        password: str,
+        consumer_key: str,
+        consumer_secret: str,
+        api_url: str = "https://api.bitbucket.org/2.0",
     ) -> None:
         self._USERNAME = username
         self._PASSWORD = password
