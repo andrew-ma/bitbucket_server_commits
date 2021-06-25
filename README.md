@@ -1,4 +1,4 @@
-# Bitbucket Commits
+# Bitbucket Server Commits
 
 ## Install
 ```

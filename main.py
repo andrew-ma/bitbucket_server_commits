@@ -1,11 +1,11 @@
+# https://docs.atlassian.com/bitbucket-server/rest/7.13.0/bitbucket-rest.html#idp222
 import logging
 from datetime import datetime, timezone
 import sys
 import os
 import argparse
 import getpass
-import functools
-from typing import Callable, Optional, Union
+from typing import Optional, TypedDict
 
 # NON STDLIB
 import requests
@@ -15,6 +15,20 @@ logging.basicConfig(level=logging.INFO)
 
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
+
+CommitDataDict = TypedDict(
+    "CommitDataDict",
+    {
+        "date": datetime,
+        "repo": str,
+        "message": str,
+        "hash": str,
+        "author_id": str,
+        "author_nickname": str,
+        "author_display_name": str,
+        "author_uuid": str,
+    },
+)
 
 
 class BearerAuth(AuthBase):
@@ -30,103 +44,27 @@ class BitbucketSession:
     def __init__(
         self,
         *,
-        username: str,
-        password: str,
-        consumer_key: str,
-        consumer_secret: str,
-        api_url: str = "https://api.bitbucket.org/2.0",
+        personal_access_token: str,  # https://confluence.atlassian.com/bitbucketserver/personal-access-tokens-939515499.html
+        api_url: str = "https://repo.scires.com/rest/api/1.0",
     ) -> None:
-        self._USERNAME = username
-        self._PASSWORD = password
-        self._CONSUMER_KEY = consumer_key
-        self._CONSUMER_SECRET = consumer_secret
+        self._PERSONAL_ACCESS_TOKEN = personal_access_token
         self._API_URL = api_url
         self._API_DATE_FORMAT = "%Y-%m-%dT%H:%M:%S+00:00"
 
-        self._access_token = ""
-        self._refresh_token = ""
-
         self.session = requests.Session()
+        self.session.auth = BearerAuth(self._PERSONAL_ACCESS_TOKEN)
 
-    def new_access_token(
-        self, required_token_scopes: list[str] = ["project", "account"]
-    ) -> None:
-        """[summary] Will use password authentication to get a new access token, then set the private variable"""
-        # GET ACCESS TOKEN
-        url = "https://bitbucket.org/site/oauth2/access_token"
-        request_data = {
-            "grant_type": "password",
-            "username": self._USERNAME,
-            "password": self._PASSWORD,
-        }
-
-        # TODO: handle 2FA request and response where password is not valid
-        res = self.session.post(
-            url,
-            data=request_data,
-            auth=HTTPBasicAuth(self._CONSUMER_KEY, self._CONSUMER_SECRET),
-        )
-        res_json = res.json()
-
-        access_token_scopes = res_json["scopes"].split()
-        for s in required_token_scopes:
-            assert (
-                s in access_token_scopes
-            ), f"Missing required scope (Required: {', '.join(required_token_scopes)}). Edit consumer permission here: https://bitbucket.org/{self._USERNAME}/workspace/settings/oauth-consumers/"
-
-        self._access_token = res_json["access_token"]
-        self._refresh_token = res_json["refresh_token"]
-        log.debug(f"{self._access_token=}\n{self._refresh_token=}")
-
-        self.session.auth = BearerAuth(self._access_token)
-
-    def refresh_access_token(self) -> None:
-        assert self._refresh_token != "", "No refresh token"
-
-        url = "https://bitbucket.org/site/oauth2/access_token"
-        request_data = {
-            "grant_type": "refresh_token",
-            "refresh_token": self._refresh_token,
-        }
-
-        res = self.session.post(
-            url,
-            data=request_data,
-            auth=HTTPBasicAuth(self._CONSUMER_KEY, self._CONSUMER_SECRET),
-        )
-        res_json = res.json()
-
-        self._access_token = res_json["access_token"]
-        self._refresh_token = res_json["refresh_token"]
-        log.debug(f"{self._access_token=}\n{self._refresh_token=}")
-
-        self.session.auth = BearerAuth(self._access_token)
-
-    def requires_access_token(func: Callable) -> Callable:  # type: ignore
-        """Decorator to assert Access Token is set"""
-
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            self = args[0]
-            assert self._access_token != "", "No access token"
-
-            return func(*args, **kwargs)
-
-        return wrapper
-
-    @requires_access_token
     def get_user_info(self) -> dict[str, str]:
 
         # GET USER ACCOUNT_ID and USER UUID
         url = f"{self._API_URL}/user"
-        res = self.session.get(url, auth=BearerAuth(self._access_token))
+        res = self.session.get(url)
         res_json = res.json()
 
-        # NOTE: here is how we will get the username if using something other than Password authentication, like Oath2
-        user_username = res_json["username"]  # anmacode
-        user_uuid = res_json["uuid"]  # numbers
-        user_nickname = res_json["nickname"]  # Andrew Ma
-        user_account_id = res_json["account_id"]  # numbers
+        user_username = res_json["username"]
+        user_uuid = res_json["uuid"]
+        user_nickname = res_json["nickname"]
+        user_account_id = res_json["account_id"]
 
         log.debug(
             f"{user_username=}\n{user_uuid=}\n{user_nickname=}\n{user_account_id=}"
@@ -159,7 +97,6 @@ class BitbucketSession:
         if account_id is not None:
             self._account_id = account_id
 
-    @requires_access_token
     def get_repositories_by_permission(
         self, permissions: list[str] = ["admin", "write", "read"]
     ) -> list[str]:
@@ -180,21 +117,13 @@ class BitbucketSession:
                 f'permission="{p}"' for p in permissions
             )  ## e.g.,  q='permission="admin" OR permission="write" OR permission="read"'
         }
-        res = self.session.get(url, params=params, auth=BearerAuth(self._access_token))
+        res = self.session.get(url, params=params)
         res_json = res.json()
 
         repo_objects = res_json["values"]
-        # for repo in repo_objects:
-        #     repo_permission = repo["permission"] # admin
-        #     repo_full_name = repo["repository"]["full_name"] # anmacode/repo1
-        #     repo_name = repo["repository"]["name"] # repo1
-        #     repo_uuid = repo["repository"]["uuid"]
-        #     log.info(f"{repo_permission=}\n{repo_full_name=}\n{repo_name=}\n{repo_uuid=}")
-        ##     self.get_commits_in_repository(repo["repository"]["full_name"])
 
         return [repo["repository"]["full_name"] for repo in repo_objects]
 
-    @requires_access_token
     def get_commits_in_repository(
         self,
         repo_full_name: str,
@@ -202,7 +131,7 @@ class BitbucketSession:
         account_id: Optional[str] = None,
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
-    ) -> list[dict[str, Union[str, datetime]]]:
+    ) -> list[CommitDataDict]:
         repo_workspace, repo_slug = repo_full_name.split("/")
 
         # FOR EACH REPO THAT USER HAS ACCESS TO, CHECK THE COMMITS (https://developer.atlassian.com/bitbucket/api/2/reference/resource/repositories/%7Bworkspace%7D/%7Brepo_slug%7D/commits)
@@ -210,14 +139,12 @@ class BitbucketSession:
             f"{self._API_URL}/repositories/{repo_workspace}/{repo_slug}/commits"
         )
 
-        res = self.session.get(
-            repo_commits_api_url, auth=BearerAuth(self._access_token)
-        )
+        res = self.session.get(repo_commits_api_url)
         res_json = res.json()
 
         commit_objects = res_json["values"]
 
-        commit_list = []
+        commit_list: list[CommitDataDict] = []
 
         for commit in commit_objects:
             # Filter By Account ID
@@ -244,7 +171,7 @@ class BitbucketSession:
                     # Inclusive (<=) of end_date
                     continue
 
-            commit_data = {
+            commit_data: CommitDataDict = {
                 "repo": repo_full_name,
                 "date": date,  # type is datetime, not str
                 "message": commit["message"],
@@ -264,6 +191,58 @@ class BitbucketSession:
         (repo_full_name, commit_list) = x
         return commit_list[-1]["date"]
 
+    def get_projects(self):
+        """Retrieve a page of projects.
+
+        Only projects for which the authenticated user has the PROJECT_VIEW permission will be returned.
+
+        paged api
+        
+        """
+        url = f"{self._API_URL}/projects"
+        res = self.session.get(url)
+        if res.status_code != 200:
+            res.raise_for_status()
+
+        res_json = res.json()
+        log.info(res_json)
+        return res_json
+
+    def get_project_repos(self, project_key: str):
+        """Retrieve repositories from the project corresponding to the supplied projectKey.
+
+        The authenticated user must have REPO_READ permission for the specified project to call this resource.
+        
+        paged api
+
+        """
+        url = f"{self._API_URL}/projects/{project_key}/repos"
+        res = self.session.get(url)
+        if res.status_code != 200:
+            res.raise_for_status()
+
+        res_json = res.json()
+        log.info(res_json)
+        return res_json
+        
+    def get_repo_commits(self, project_key: str, repo_slug: str):
+        """Retrieve a page of commits from a given starting commit or "between" two commits. If no explicit commit is specified, the tip of the repository's default branch is assumed. commits may be identified by branch or tag name or by ID. A path may be supplied to restrict the returned commits to only those which affect that path.
+
+        The authenticated user must have REPO_READ permission for the specified repository to call this resource.
+        
+        paged api
+        """
+        url = f"{self._API_URL}/projects/{project_key}/repos/{repo_slug}/commits"
+        res = self.session.get(url)
+        if res.status_code != 200:
+            res.raise_for_status()
+
+        res_json = res.json()
+        log.info(res_json)
+        return res_json
+        
+        
+
     def run(
         self,
         *,
@@ -271,8 +250,6 @@ class BitbucketSession:
         end_date: Optional[datetime] = None,
         sort_individually: bool = False,
     ) -> None:
-        self.new_access_token()
-
         user_account_id = self.get_user_info()["account_id"]
         repositories = self.get_repositories_by_permission()
 
@@ -331,38 +308,18 @@ def get_args():
             raise argparse.ArgumentTypeError(f"Invalid date string: {date_string}")
 
     parser = argparse.ArgumentParser(
-        description="Get My Bitbucket Commits",
+        description="Bitbucket Server Commits",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     required_group = parser.add_argument_group("required arguments")
     required_group.add_argument(
-        "-u",
-        "--username",
-        help="Your Bitbucket Username",
-        required=True,
-        default=argparse.SUPPRESS,
-    )
-    required_group.add_argument(
-        "-k",
-        "--key",
-        help="Your Consumer Key. To create a consumer: https://bitbucket.org/{YOUR_WORKSPACE_ID}/workspace/settings/api",
-        required=True,
-        default=argparse.SUPPRESS,
-    )
-    required_group.add_argument(
-        "-s",
-        "--secret",
-        help="Your Consumer Secret. To create a consumer: https://bitbucket.org/{YOUR_WORKSPACE_ID}/workspace/settings/api",
+        "-p",
+        "--personal-access-token",
+        help="Personal Access Token for Bitbucket Server (To create one:  https://confluence.atlassian.com/bitbucketserver/personal-access-tokens-939515499.html). This cli argument takes priority over environment variable 'BITBUCKET_PERSONAL_ACCESS_TOKEN'. If neither the cli argument nor environment variable exist, then user will be prompted for personal access token.",
         required=True,
         default=argparse.SUPPRESS,
     )
 
-    parser.add_argument(
-        "-p",
-        "--password",
-        help="Your Bitbucket Password. Note: 2FA accounts do not work. This cli argument takes priority over environment variable 'BITBUCKET_PASSWORD'. If neither the cli argument nor environment variable exist, then user will be prompted for password.",
-        default=None,
-    )
     escaped_percents_date_formats = ", ".join(
         map(lambda x: f'"{x.replace("%", "%%")}"', VALID_DATE_FORMATS)
     )
@@ -390,29 +347,21 @@ def get_args():
 
 def main():
     args = get_args()
-    USERNAME = args.username
-    PASSWORD = args.password
-    if PASSWORD is None:
-        # if didn't specify password by cli arg "-p/--password", then try
-        # environment variable "BITBUCKET_PASSWORD"
-        PASSWORD = os.getenv("BITBUCKET_PASSWORD")
-        if PASSWORD is None:
-            # if environment variable is also None, then prompt user for password
-            PASSWORD = getpass.getpass()
-    CONSUMER_KEY = args.key
-    CONSUMER_SECRET = args.secret
+    PERSONAL_ACCESS_TOKEN = args.personal_access_token
+    if PERSONAL_ACCESS_TOKEN is None:
+        # if didn't specify personal access token by cli arg "-p/--personal-access-token", then try
+        # environment variable "BITBUCKET_PERSONAL_ACCESS_TOKEN"
+        PERSONAL_ACCESS_TOKEN = os.getenv("BITBUCKET_PERSONAL_ACCESS_TOKEN")
+        if PERSONAL_ACCESS_TOKEN is None:
+            # if environment variable is also None, then prompt user for personal access token
+            PERSONAL_ACCESS_TOKEN = getpass.getpass()
 
     START_DATE = args.start_date
     END_DATE = args.end_date
 
     SORT_INDIVIDUALLY = args.sort_individually
 
-    session = BitbucketSession(
-        username=USERNAME,
-        password=PASSWORD,
-        consumer_key=CONSUMER_KEY,
-        consumer_secret=CONSUMER_SECRET,
-    )
+    session = BitbucketSession(personal_access_token=PERSONAL_ACCESS_TOKEN)
     session.run(
         start_date=START_DATE, end_date=END_DATE, sort_individually=SORT_INDIVIDUALLY
     )
